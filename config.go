@@ -13,14 +13,19 @@ import (
 	"sync"
 )
 
-const (
-	failIfErr = false
-)
-
 // Used to send and receive data and read write errors
 type ConfigData struct {
 	Data  chan []byte
 	Error chan error
+}
+
+//  Holds data about a program's configuration.
+type ProgramConfig struct {
+	programPath string // Path to the program's config dir
+	programName string // Used as the program's config dir
+	confName    string // Filename of the program's configuration
+	isTemporary bool
+	lock        sync.RWMutex
 }
 
 // Listens for changes on the configuration, and returns the read configs.
@@ -98,13 +103,9 @@ func (c *ProgramConfig) Read() ([]byte, error) {
 	return ioutil.ReadFile(c.getPath())
 }
 
-//  Holds data about a program's configuration.
-type ProgramConfig struct {
-	programPath string // Path to the program's config dir
-	programName string // Used as the program's config dir
-	confName    string // Filename of the program's configuration
-	isTemporary bool
-	lock        sync.RWMutex
+func (c *ProgramConfig) Exists() bool {
+	_, err := os.Stat(c.getPath())
+	return err != nil
 }
 
 // Get the full path to the configuration file of the program
@@ -161,11 +162,6 @@ func (c *ProgramConfig) copyConf(to string) (*ProgramConfig, error) {
 // Returns a copy of the config which relies in /tmp
 func (c *ProgramConfig) makeTmp() (*ProgramConfig, error) {
 	return c.copyConf(path.Join("/tmp", c.programName, c.confName))
-}
-
-func (c *ProgramConfig) Exists() bool {
-	_, err := os.Stat(c.getPath())
-	return err != nil
 }
 
 // Creates a ProgramConfig struct if ProgramConfig exists
