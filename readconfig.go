@@ -6,17 +6,19 @@ package readconf
 import (
 	"code.google.com/p/go.exp/inotify"
 	"errors"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
 	"path"
 	"sync"
+	"time"
 )
 
 // Used to send and receive data and read write errors
 type ConfigData struct {
-	Data  chan []byte
-	Error chan error
+	Data  <-chan []byte
+	Error <-chan error
 }
 
 //  Holds data about a program's configuration.
@@ -28,12 +30,18 @@ type ProgramConfig struct {
 	lock        sync.RWMutex
 }
 
+func init() {
+	fmt.Println()
+}
+
 // Listens for changes on the configuration, and returns the read configs.
 // Reads once on start.
 // Update: check if it can handle writes
 func (c *ProgramConfig) Listen() (*ConfigData, error) {
 
-	conf := ConfigData{make(chan []byte), make(chan error)}
+	data := make(chan []byte)
+	errs := make(chan error)
+	conf := ConfigData{data, errs}
 
 	watcher, err := inotify.NewWatcher()
 	if err != nil {
@@ -54,25 +62,27 @@ func (c *ProgramConfig) Listen() (*ConfigData, error) {
 				if ev.Mask != inotify.IN_MODIFY {
 					continue
 				}
+				<-time.After(1e6)
 
 				if newConf, err := c.Read(); err != nil {
-					conf.Error <- err
+					errs <- err
 				} else {
-					conf.Data <- newConf
+					data <- newConf
 				}
 
-			case newConf := <-conf.Data:
-				c.Set(newConf)
+			// case newConf := <-conf.Data:
+			// 	c.Set(newConf)
 
 			case err := <-watcher.Error:
-				conf.Error <- err
+				errs <- err
 			}
 		}
 	}()
 
 	// Force an initial read
-	watcher.Event <- new(inotify.Event)
+	// watcher.Event <- new(inotify.Event)
 
+	<-time.After(1e9)
 	return &conf, nil
 }
 
@@ -105,7 +115,7 @@ func (c *ProgramConfig) Read() ([]byte, error) {
 
 func (c *ProgramConfig) Exists() bool {
 	_, err := os.Stat(c.getPath())
-	return err != nil
+	return err == nil
 }
 
 // Get the full path to the configuration file of the program
@@ -121,47 +131,41 @@ func (p *ProgramConfig) getPath() string {
 // 	return c.getPath(), nil
 // }
 
-// Copy a configuration to a path
-func (c *ProgramConfig) copyConf(to string) (*ProgramConfig, error) {
-	dir := path.Dir(to)
-	programPath := path.Dir(dir)
-	confDir := path.Base(dir)
-	confName := path.Base(to)
+func splitPath(fullPath string) (programPath, programName, confName string, err error) {
+	dir := path.Dir(fullPath)
+	programPath = path.Dir(dir)
+	programName = path.Base(dir)
+	confName = path.Base(fullPath)
 
 	switch "" {
 	case programPath:
 		fallthrough
-	case confDir:
+	case programName:
 		fallthrough
 	case confName:
-		return nil, errors.New("Could not decompose path.")
+		err = errors.New("Could not decompose path.")
 	}
+
+	return
+
+}
+
+// Copy a configuration to a path
+func (c *ProgramConfig) copyConf(programPath, programName, confName string) (*ProgramConfig, error) {
 
 	isTmp := false
 	if programPath == "/tmp" {
 		isTmp = true
 	}
 
-	newConf := ProgramConfig{programPath, confDir, confName, isTmp, sync.RWMutex{}}
-
-	// Create parent directories if necessary
-	if err := os.MkdirAll(dir, os.ModeDir); err != nil {
-		return nil, err
-	}
-	// Copy, truncate destination if it exists
-	if fromFile, err := os.Open(c.getPath()); err != nil {
-		return nil, err
-	} else if toFile, err := os.Create(newConf.getPath()); err != nil {
-		return nil, err
-	} else if _, err := io.Copy(toFile, fromFile); err != nil {
-		return nil, err
-	}
-	return &newConf, nil
+	newConf := ProgramConfig{programPath, programName, confName, isTmp, sync.RWMutex{}}
+	err := newConf.read(c)
+	return &newConf, err
 }
 
 // Returns a copy of the config which relies in /tmp
 func (c *ProgramConfig) makeTmp() (*ProgramConfig, error) {
-	return c.copyConf(path.Join("/tmp", c.programName, c.confName))
+	return c.copyConf("/tmp", c.programName, c.confName)
 }
 
 // Creates a ProgramConfig struct if ProgramConfig exists
@@ -170,12 +174,50 @@ func findConfig(configPath, programName, confName string) (*ProgramConfig, error
 	if conf.Exists() {
 		return &conf, nil
 	}
-	return nil, errors.New("System specific ProgramConfig does not exist")
+
+	return nil, errors.New(fmt.Sprint("ProgramConfig does not exist in", conf.getPath()))
 }
 
 // Returns the system specific ProgramConfig
 func getSysConfig(programName, confName string) (*ProgramConfig, error) {
 	return findConfig("/etc", programName, confName)
+}
+
+// Read in another configuration file
+func (c *ProgramConfig) read(from *ProgramConfig) error {
+
+	// Create parent directories if necessary with full permissions for user, none for the rest
+	if err := os.MkdirAll(path.Join(c.programPath, c.programName), 0700); err != nil {
+		return err
+	}
+	// Copy, truncate destination if it exists
+	fromFile, err := os.Open(from.getPath())
+	if err != nil {
+		return err
+	}
+	defer fromFile.Close()
+
+	toFile, err := os.Create(c.getPath())
+	if err != nil {
+		return err
+	}
+	defer toFile.Close()
+
+	if _, err := io.Copy(toFile, fromFile); err != nil {
+		return err
+	}
+	return nil
+
+}
+
+func copySysConfig(programPath, programName, confName string) (*ProgramConfig, error) {
+	sysConf, err := getSysConfig(programName, confName)
+	if err != nil {
+		return nil, err
+	}
+
+	return sysConf.copyConf(programPath, programName, confName)
+
 }
 
 // Give a program name and a configuration file name, and get returned a path with a valid config.
@@ -188,19 +230,18 @@ func getSysConfig(programName, confName string) (*ProgramConfig, error) {
 // If no system configuration can be retrieved, the program returns an error.
 func Get(programName, confName string) (*ProgramConfig, error) {
 
-	// Try to fetch and or create config in $XDG_CONFIG_HOME
-	if t := os.Getenv("XDG_CONFIG_HOME"); t != "" {
-		if conf, err := findConfig(t, programName, confName); err != nil {
-			return nil, err
-		} else {
-			return conf, nil
-		}
+	programPath := os.Getenv("XDG_CONFIG_HOME")
+	if programPath == "" {
+		programPath = path.Join(os.Getenv("HOME"), ".config")
 	}
 
-	// Try to fetch and or create config in $HOME/.config
-	if t := os.Getenv("HOME"); t != "" {
-		if conf, err := findConfig(t, programName, confName); err != nil {
-			return nil, err
+	// Managed to set user path, so try to fetch and or create config here
+	if programPath != ".config" {
+		if conf, err := findConfig(programPath, programName, confName); err != nil {
+			userConf, err := copySysConfig(programPath, programName, confName)
+			if err == nil {
+				return userConf, nil
+			}
 		} else {
 			return conf, nil
 		}
