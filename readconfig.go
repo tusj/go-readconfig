@@ -1,4 +1,5 @@
-// Package readconf implements two things abstracts away the need to set and handle a user configuratio abstracts away the need to set and handle a user configuration. It tries to set a user defined configuration path according to the existence of $XDG_CONFIG_HOME and falls back to $HOME/.config.
+// Package readconf implements two things abstracts away the need to set and handle a user configuration.
+// It tries to set a configuration path according to the existence of $XDG_CONFIG_HOME and falls back to $HOME/.config.
 //
 // It supports watching for file changes through inotify.
 package readconf
@@ -32,7 +33,6 @@ type ProgramConfig struct {
 
 // Listens for changes on the configuration, and returns the read configs.
 // Reads once on start.
-// Update: check if it can handle writes
 func (c *ProgramConfig) Listen() (*ConfigData, error) {
 
 	data := make(chan []byte)
@@ -66,6 +66,7 @@ func (c *ProgramConfig) Listen() (*ConfigData, error) {
 					data <- newConf
 				}
 
+			// FEATURE could handle writes as well
 			// case newConf := <-conf.Data:
 			// 	c.Set(newConf)
 
@@ -76,15 +77,14 @@ func (c *ProgramConfig) Listen() (*ConfigData, error) {
 	}()
 
 	// Force an initial read
-	// watcher.Event <- new(inotify.Event)
+	watcher.Event <- new(inotify.Event)
 
 	<-time.After(1e9)
 	return &conf, nil
 }
 
-// Returns a channel which writes to the configuration
-// ISSUE Check with dependency on Get()
-func (c *ProgramConfig) Set(newConf []byte) error {
+// Write contents to the configuration
+func (c *ProgramConfig) Write(newConf []byte) (n int, err error) {
 
 	file, err := os.Create(c.getPath())
 	if err != nil {
@@ -94,11 +94,10 @@ func (c *ProgramConfig) Set(newConf []byte) error {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
-	_, err = file.Write(newConf)
-	return err
+	return file.Write(newConf)
 }
 
-// Return a read of the configuration
+// Return the contents of the configuration
 func (c *ProgramConfig) Read() ([]byte, error) {
 
 	// Make a lock per function
@@ -118,14 +117,6 @@ func (c *ProgramConfig) Exists() bool {
 func (p *ProgramConfig) getPath() string {
 	return path.Join(p.programPath, p.programName, p.confName)
 }
-
-// Returns the ProgramConfig path if it exists
-// func (c *ProgramConfig) Get() (string, error) {
-// 	if _, err := os.Stat(c.getPath()); err != nil {
-// 		return "", err
-// 	}
-// 	return c.getPath(), nil
-// }
 
 func splitPath(fullPath string) (programPath, programName, confName string, err error) {
 	dir := path.Dir(fullPath)
