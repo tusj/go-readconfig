@@ -2,6 +2,7 @@ package readconf
 
 import (
 	"bytes"
+	"fmt"
 	"io/ioutil"
 	"math/rand"
 	"os"
@@ -149,7 +150,7 @@ func TestListen(t *testing.T) {
 			t.Error(err)
 
 		case conf := <-listen.Data:
-
+			fmt.Println("got", string(conf))
 			if bytes.Compare(conf, b) != 0 {
 				t.Error("Could not read the same as what was written. Got:",
 					string(conf), "Sent:", string(b))

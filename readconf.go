@@ -55,7 +55,14 @@ func (c *Config) Listen() (*ConfigData, error) {
 		for {
 			select {
 			case ev := <-watcher.Event:
-				if ev.Mask != inotify.IN_MODIFY {
+				fmt.Println(ev)
+				switch ev.Mask {
+				case inotify.IN_MODIFY:
+					fallthrough
+				case inotify.IN_MOVE_SELF:
+					fallthrough
+				case inotify.IN_DELETE_SELF:
+				default:
 					continue
 				}
 				<-time.After(1e6)
@@ -63,6 +70,7 @@ func (c *Config) Listen() (*ConfigData, error) {
 				if newConf, err := c.Read(); err != nil {
 					errs <- err
 				} else {
+					fmt.Println(string(newConf))
 					data <- newConf
 				}
 
