@@ -30,10 +30,6 @@ type ProgramConfig struct {
 	lock        sync.RWMutex
 }
 
-func init() {
-	fmt.Println()
-}
-
 // Listens for changes on the configuration, and returns the read configs.
 // Reads once on start.
 // Update: check if it can handle writes

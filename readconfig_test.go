@@ -2,13 +2,11 @@ package readconf
 
 import (
 	"bytes"
-	"fmt"
 	"io/ioutil"
 	"math/rand"
 	"os"
 	"path"
 	"testing"
-	// "time"
 )
 
 const (
@@ -28,12 +26,11 @@ var (
 // Clearing of environment
 // Needed environment has to be set explicitly as it is not local to functions
 func init() {
-	fmt.Println()
 	home = os.Getenv("HOME")
 	XDGHome = os.Getenv("XDG_CONFIG_HOME")
 	confPath = path.Join("/etc", programName, confName)
 	os.Clearenv()
-	// defer cleanup!!
+	// TODO Clean up test files
 }
 
 func exists(path string) bool {
