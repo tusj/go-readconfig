@@ -2,7 +2,6 @@ package readconf
 
 import (
 	"bytes"
-	"fmt"
 	"io/ioutil"
 	"math/rand"
 	"os"
@@ -11,7 +10,7 @@ import (
 )
 
 const (
-	changeCnt          = 500
+	changeCnt          = 100
 	timeout            = 2e9
 	programName string = "fonts" // Hopefully existing on all unixes
 	confName    string = "fonts.conf"
@@ -140,9 +139,9 @@ func TestListen(t *testing.T) {
 	fileName := conf.getPath()
 
 	length := 10
-	b := make([]byte, length)
+	var b []byte
 	for i := 0; i < changeCnt; i++ {
-		copy(b, randStr(length))
+		b = randStr(length)
 		ioutil.WriteFile(fileName, b, os.ModePerm)
 
 		select {
@@ -150,9 +149,8 @@ func TestListen(t *testing.T) {
 			t.Error(err)
 
 		case conf := <-listen.Data:
-			fmt.Println("got", string(conf))
 			if bytes.Compare(conf, b) != 0 {
-				t.Error("Could not read the same as what was written. Got:",
+				t.Fatal("Could not read the same as what was written. Got:",
 					string(conf), "Sent:", string(b))
 			}
 			r++

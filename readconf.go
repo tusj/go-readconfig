@@ -32,7 +32,6 @@ type Config struct {
 }
 
 // Listens for changes on the configuration, and returns the read configs.
-// Reads once on start.
 func (c *Config) Listen() (*ConfigData, error) {
 
 	data := make(chan []byte)
@@ -55,7 +54,6 @@ func (c *Config) Listen() (*ConfigData, error) {
 		for {
 			select {
 			case ev := <-watcher.Event:
-				fmt.Println(ev)
 				switch ev.Mask {
 				case inotify.IN_MODIFY:
 					fallthrough
@@ -65,29 +63,26 @@ func (c *Config) Listen() (*ConfigData, error) {
 				default:
 					continue
 				}
-				<-time.After(1e6)
+				// ISSUE Fix having to wait to read file after event has happened to get file content
+				<-time.After(5e7)
 
 				if newConf, err := c.Read(); err != nil {
 					errs <- err
 				} else {
-					fmt.Println(string(newConf))
 					data <- newConf
 				}
 
 			// FEATURE could handle writes as well
 			// case newConf := <-conf.Data:
-			// 	c.Set(newConf)
+			// 	c.Write(newConf)
 
 			case err := <-watcher.Error:
 				errs <- err
 			}
+
 		}
 	}()
 
-	// Force an initial read
-	watcher.Event <- new(inotify.Event)
-
-	<-time.After(1e9)
 	return &conf, nil
 }
 
@@ -107,8 +102,6 @@ func (c *Config) Write(newConf []byte) (n int, err error) {
 
 // Return the contents of the configuration
 func (c *Config) Read() ([]byte, error) {
-
-	// Make a lock per function
 
 	c.lock.RLock()
 	defer c.lock.RUnlock()
